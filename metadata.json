@@ -1,0 +1,7 @@
+{
+  "name": "Decision Helper",
+  "description": "A friendly, human-centric daily choice assistant that helps you weigh life's options with clarity and confidence.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}
