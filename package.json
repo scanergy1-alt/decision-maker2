@@ -6,7 +6,7 @@
   },
   "scripts": {
     "start": "parcel index.html",
-    "build": "rm -rf .parcel-cache && parcel build index.html --no-cache --dist-dir dist --no-optimize"
+    "build": "parcel build index.html --dist-dir dist"
   },
   "dependencies": {
     "react": "^18.3.1",
