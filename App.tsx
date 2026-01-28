@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { v4 as uuidv4 } from 'uuid';
 import { GoogleGenAI, LiveServerMessage, Modality, Blob } from '@google/genai';
 import { Decision, WeightedItem, DecisionResult, Task, SubTask } from './types';
@@ -58,26 +58,21 @@ function createBlob(data: Float32Array): Blob {
 
 const Logo: React.FC<{ className?: string }> = ({ className = "" }) => (
   <div className={`flex items-center gap-2 sm:gap-4 md:gap-6 ${className}`}>
-    {/* Refined Minimalist Lightbulb Icon in Teal #549090 */}
     <div className="flex items-center justify-center shrink-0">
       <svg width="24" height="24" className="sm:w-8 sm:h-8 md:w-11 md:h-11" viewBox="0 0 24 24" fill="none" stroke="#549090" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round">
-        {/* Main bulb circle */}
         <circle cx="12" cy="11" r="5" />
-        {/* Radiating segments matching image layout */}
-        <path d="M12 3v2" /> {/* Top */}
-        <path d="M19 8l-1.5 1" /> {/* Top Right */}
-        <path d="M22 12h-2" /> {/* Right */}
-        <path d="M19 16l-1.5-1" /> {/* Bottom Right */}
-        <path d="M5 16l1.5-1" /> {/* Bottom Left */}
-        <path d="M2 12h2" /> {/* Left */}
-        <path d="M5 8l1.5 1" /> {/* Top Left */}
-        {/* Bulb base detail */}
+        <path d="M12 3v2" />
+        <path d="M19 8l-1.5 1" />
+        <path d="M22 12h-2" />
+        <path d="M19 16l-1.5-1" />
+        <path d="M5 16l1.5-1" />
+        <path d="M2 12h2" />
+        <path d="M5 8l1.5 1" />
         <path d="M10 16c.3 1 1 1.5 2 1.5s1.7-.5 2-1.5" />
         <path d="M10 18h4" />
         <path d="M11 20h2" />
       </svg>
     </div>
-    {/* Clean Modern Sans-Serif Text with High Tracking - Scaled for Mobile */}
     <div className="text-[#549090] text-sm xs:text-base sm:text-2xl md:text-4xl font-light tracking-[0.15em] sm:tracking-[0.25em] whitespace-nowrap pt-0.5">
       DECISION HELPER
     </div>
@@ -85,7 +80,7 @@ const Logo: React.FC<{ className?: string }> = ({ className = "" }) => (
 );
 
 const App: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'Standard' | 'Focus' | 'History'>('Standard');
+  const [activeTab, setActiveTab] = useState<'Standard' | 'Focus' | 'Calendar' | 'History'>('Standard');
   const [standardSubMode, setStandardSubMode] = useState<'Quick' | 'Deep'>('Quick');
   const [dilemma, setDilemma] = useState('');
   const [prosText, setProsText] = useState('');
@@ -100,10 +95,16 @@ const App: React.FC = () => {
   const [newTaskTitle, setNewTaskTitle] = useState('');
   const [newTaskDeadline, setNewTaskDeadline] = useState('');
   const [newTaskPriority, setNewTaskPriority] = useState<'High' | 'Medium' | 'Low'>('Medium');
+  const [newTaskNotes, setNewTaskNotes] = useState('');
   const [isScheduling, setIsScheduling] = useState(false);
   const [scheduleSummary, setScheduleSummary] = useState('');
+  const [showScheduleLog, setShowScheduleLog] = useState(false);
 
-  // Live Conversation Refs & State
+  // Calendar Logic State
+  const [currentDate, setCurrentDate] = useState(new Date());
+  const [selectedCalendarDate, setSelectedCalendarDate] = useState<string>(new Date().toISOString().split('T')[0]);
+
+  // Live Conversation State
   const [isListening, setIsListening] = useState(false);
   const [liveStatus, setLiveStatus] = useState<'IDLE' | 'LISTENING' | 'THINKING' | 'SPEAKING'>('IDLE');
   
@@ -186,14 +187,16 @@ const App: React.FC = () => {
     const newTask: Task = {
       id: uuidv4(),
       title: newTaskTitle,
-      deadline: newTaskDeadline || 'Today',
+      deadline: newTaskDeadline || new Date().toISOString().split('T')[0],
       priority: newTaskPriority,
+      notes: newTaskNotes,
       completed: false,
       subTasks: []
     };
     setTasks([...tasks, newTask]);
     setNewTaskTitle('');
     setNewTaskDeadline('');
+    setNewTaskNotes('');
   };
 
   const deleteTask = (id: string) => {
@@ -233,6 +236,7 @@ const App: React.FC = () => {
         }
         return t;
       }));
+      setShowScheduleLog(true);
     } catch (err) {
       setError("Failed to generate schedule.");
     } finally {
@@ -296,7 +300,7 @@ const App: React.FC = () => {
       outputAudioContextRef.current = outAudioCtx;
 
       const sessionPromise = ai.live.connect({
-        model: 'gemini-2.5-flash-native-audio-preview-09-2025',
+        model: 'gemini-2.5-flash-native-audio-preview-12-2025',
         callbacks: {
           onopen: () => {
             const source = inAudioCtx.createMediaStreamSource(stream);
@@ -380,25 +384,67 @@ const App: React.FC = () => {
     }
   };
 
-  const sortedTasks = [...tasks].sort((a, b) => {
-    if (a.completed !== b.completed) return a.completed ? 1 : -1;
-    if (a.suggestedOrder !== undefined && b.suggestedOrder !== undefined) return a.suggestedOrder - b.suggestedOrder;
-    return 0;
-  });
+  // Calendar Helpers
+  const getDaysInMonth = (year: number, month: number) => new Date(year, month + 1, 0).getDate();
+  const getFirstDayOfMonth = (year: number, month: number) => new Date(year, month, 1).getDay();
+
+  const calendarGrid = useMemo(() => {
+    const year = currentDate.getFullYear();
+    const month = currentDate.getMonth();
+    const daysInMonth = getDaysInMonth(year, month);
+    const firstDay = getFirstDayOfMonth(year, month);
+    
+    const days = [];
+    // Previous month padding
+    const prevMonthDays = getDaysInMonth(year, month - 1);
+    for (let i = firstDay - 1; i >= 0; i--) {
+      days.push({ day: prevMonthDays - i, month: month - 1, year, isPadding: true });
+    }
+    // Current month
+    for (let i = 1; i <= daysInMonth; i++) {
+      days.push({ day: i, month, year, isPadding: false });
+    }
+    // Next month padding
+    const remaining = 42 - days.length;
+    for (let i = 1; i <= remaining; i++) {
+      days.push({ day: i, month: month + 1, year, isPadding: true });
+    }
+    return days;
+  }, [currentDate]);
+
+  const tasksByDate = useMemo(() => {
+    const map: Record<string, Task[]> = {};
+    tasks.forEach(task => {
+      const date = task.deadline || 'No Date';
+      if (!map[date]) map[date] = [];
+      map[date].push(task);
+    });
+    return map;
+  }, [tasks]);
+
+  const selectedDateTasks = useMemo(() => tasksByDate[selectedCalendarDate] || [], [tasksByDate, selectedCalendarDate]);
+
+  const changeMonth = (offset: number) => {
+    setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() + offset, 1));
+  };
+
+  const scheduledTasks = useMemo(() => tasks
+    .filter(t => t.suggestedOrder !== undefined && !t.completed)
+    .sort((a, b) => (a.suggestedOrder || 0) - (b.suggestedOrder || 0)), [tasks]);
 
   return (
     <div className="min-h-screen pb-40 selection:bg-indigo-100 relative overflow-x-hidden">
       <nav className="bg-white/95 backdrop-blur-lg sticky top-0 z-50 border-b border-slate-100 shadow-sm">
         <div className="max-w-4xl mx-auto px-4 sm:px-6 h-16 sm:h-24 flex items-center justify-between gap-2">
           <Logo className="flex-shrink-0" />
-          <div className="flex bg-slate-100/80 p-1 rounded-xl sm:rounded-2xl">
-            {(['Standard', 'Focus', 'History'] as const).map(tab => (
+          <div className="flex bg-slate-100/80 p-1 rounded-lg sm:rounded-2xl overflow-x-auto no-scrollbar">
+            {(['Standard', 'Focus', 'Calendar', 'History'] as const).map(tab => (
               <button
                 key={tab}
                 onClick={() => { setActiveTab(tab); setResult(null); setError(null); }}
-                className={`px-2 sm:px-6 py-1.5 sm:py-2.5 text-[10px] sm:text-xs font-bold rounded-lg sm:rounded-xl transition-all duration-300 ${activeTab === tab ? 'bg-white shadow-md text-indigo-600' : 'text-slate-500 hover:text-slate-800'}`}
+                className={`whitespace-nowrap px-2.5 sm:px-5 py-1.5 sm:py-2.5 text-[10px] sm:text-xs font-bold rounded-lg sm:rounded-xl transition-all duration-300 ${activeTab === tab ? 'bg-white shadow-md text-indigo-600' : 'text-slate-500 hover:text-slate-800'}`}
               >
-                {tab === 'Standard' ? (window.innerWidth < 640 ? 'Start' : 'Dilemma') : tab}
+                {tab}
               </button>
             ))}
           </div>
@@ -407,98 +453,61 @@ const App: React.FC = () => {
 
       <main className="max-w-3xl mx-auto px-4 sm:px-6 mt-6 sm:mt-12">
         {activeTab === 'Standard' && (
-          <div className="space-y-8 sm:y-12 animate-in fade-in slide-in-from-bottom-6 duration-700">
-            <header className="text-center space-y-2 sm:space-y-4 max-w-xl mx-auto">
-              <h2 className="text-3xl sm:text-5xl font-extrabold text-slate-900 tracking-tight leading-tight">What's the dilemma?</h2>
-              <div className="flex items-center justify-center gap-2 pt-1 sm:pt-2">
-                 <button 
-                  onClick={() => setStandardSubMode('Quick')}
-                  className={`px-3 sm:px-4 py-1 sm:py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest transition-all ${standardSubMode === 'Quick' ? 'bg-indigo-600 text-white shadow-lg' : 'bg-slate-100 text-slate-400 hover:text-slate-600'}`}
-                 >
-                   Quick
-                 </button>
-                 <button 
-                  onClick={() => setStandardSubMode('Deep')}
-                  className={`px-3 sm:px-4 py-1 sm:py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest transition-all ${standardSubMode === 'Deep' ? 'bg-indigo-600 text-white shadow-lg' : 'bg-slate-100 text-slate-400 hover:text-slate-600'}`}
-                 >
-                   In-depth
-                 </button>
+          <div className="space-y-8 animate-in fade-in slide-in-from-bottom-6 duration-700">
+            <header className="text-center space-y-2 max-w-xl mx-auto">
+              <h2 className="text-3xl sm:text-5xl font-extrabold text-black tracking-tight leading-tight">What's the dilemma?</h2>
+              <div className="flex items-center justify-center gap-2 pt-1">
+                 <button onClick={() => setStandardSubMode('Quick')} className={`px-4 py-1 rounded-full text-[10px] font-black uppercase tracking-widest ${standardSubMode === 'Quick' ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-400'}`}>Quick</button>
+                 <button onClick={() => setStandardSubMode('Deep')} className={`px-4 py-1 rounded-full text-[10px] font-black uppercase tracking-widest ${standardSubMode === 'Deep' ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-400'}`}>In-depth</button>
               </div>
             </header>
 
-            <div className="bg-white p-6 sm:p-12 rounded-[2rem] sm:rounded-[3.5rem] shadow-2xl shadow-indigo-100/40 border border-slate-50 space-y-6 sm:space-y-10">
-              <div className="space-y-4">
-                <div className="flex justify-between items-center px-2">
-                  <label className="block text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Dilemma Input</label>
-                  {isListening && (
-                    <div className="flex items-center gap-2">
-                       <div className={`w-2 h-2 rounded-full animate-pulse ${getStatusColor()}`} />
-                       <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Call active</span>
-                    </div>
-                  )}
-                </div>
-                <textarea
-                  value={dilemma}
-                  onChange={(e) => setDilemma(e.target.value)}
-                  placeholder="Should I... because..."
-                  dir="auto"
-                  className={`w-full h-32 sm:h-44 p-6 sm:p-8 text-lg sm:text-xl bg-slate-50/50 border-2 border-transparent rounded-[1.5rem] sm:rounded-[2.5rem] focus:bg-white focus:border-indigo-400 focus:outline-none transition-all resize-none placeholder:text-slate-300 font-medium leading-relaxed ${error && !dilemma.trim() ? 'border-rose-300 bg-rose-50/20' : ''}`}
-                />
-              </div>
+            <div className="bg-white p-6 sm:p-12 rounded-[2rem] sm:rounded-[3.5rem] shadow-2xl border border-slate-50 space-y-6">
+              <textarea
+                value={dilemma}
+                onChange={(e) => setDilemma(e.target.value)}
+                placeholder="Should I... because..."
+                dir="auto"
+                className="w-full h-32 sm:h-44 p-6 sm:p-8 text-lg sm:text-xl bg-slate-50 rounded-[1.5rem] focus:bg-white focus:border-indigo-400 focus:outline-none transition-all resize-none font-medium text-black"
+              />
 
               {standardSubMode === 'Deep' && (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 sm:gap-10 animate-in slide-in-from-top-4 duration-500">
-                  <div className="space-y-4">
-                    <label className="block text-[10px] font-black text-emerald-600 uppercase tracking-[0.2em] ml-2">Advantages</label>
-                    <textarea
-                      value={prosText}
-                      onChange={(e) => setProsText(e.target.value)}
-                      placeholder="List key benefits..."
-                      dir="auto"
-                      className="w-full h-32 sm:h-44 p-5 sm:p-7 text-sm sm:text-base bg-pastel-emerald/60 border-2 border-transparent rounded-[1.5rem] sm:rounded-[2rem] focus:bg-white focus:border-emerald-300 focus:outline-none transition-all resize-none placeholder:text-emerald-300 font-medium"
-                    />
-                  </div>
-                  <div className="space-y-4">
-                    <label className="block text-[10px] font-black text-rose-600 uppercase tracking-[0.2em] ml-2">Risks / Cons</label>
-                    <textarea
-                      value={consText}
-                      onChange={(e) => setConsText(e.target.value)}
-                      placeholder="List key drawbacks..."
-                      dir="auto"
-                      className="w-full h-32 sm:h-44 p-5 sm:p-7 text-sm sm:text-base bg-pastel-rose/60 border-2 border-transparent rounded-[1.5rem] sm:rounded-[2rem] focus:bg-white focus:border-rose-300 focus:outline-none transition-all resize-none placeholder:text-rose-300 font-medium"
-                    />
-                  </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <textarea
+                    value={prosText}
+                    onChange={(e) => setProsText(e.target.value)}
+                    placeholder="Advantages..."
+                    className="w-full h-32 p-5 bg-emerald-50/50 rounded-[1.5rem] focus:bg-white outline-none resize-none text-black"
+                  />
+                  <textarea
+                    value={consText}
+                    onChange={(e) => setConsText(e.target.value)}
+                    placeholder="Drawbacks..."
+                    className="w-full h-32 p-5 bg-rose-50/50 rounded-[1.5rem] focus:bg-white outline-none resize-none text-black"
+                  />
                 </div>
               )}
 
-              {error && <p className="text-rose-500 text-center text-sm font-bold animate-pulse">{error}</p>}
-
-              <div className="flex flex-col items-center gap-6 sm:gap-8 pt-2 sm:pt-4">
+              <div className="flex flex-col items-center gap-6 pt-4">
                 <button
                   onClick={handleDecide}
                   disabled={loading}
-                  className="group relative w-full sm:w-auto px-10 sm:px-16 py-4 sm:py-6 bg-slate-900 text-white rounded-full font-black text-lg sm:text-xl shadow-xl hover:shadow-2xl transition-all duration-300 disabled:opacity-50"
+                  className="px-10 py-4 bg-slate-900 text-white rounded-full font-black text-lg shadow-xl hover:scale-105 transition-all disabled:opacity-50"
                 >
-                  <div className="relative z-10 flex items-center justify-center gap-4">
-                    {loading ? "Deciding..." : "Get Direction"}
-                  </div>
-                  <div className="absolute inset-0 bg-gradient-to-r from-indigo-700 to-indigo-50 opacity-0 group-hover:opacity-100 transition-opacity rounded-full" />
+                  {loading ? "Deciding..." : "Get Direction"}
                 </button>
-                <button onClick={resetForm} className="text-slate-400 text-[10px] font-black hover:text-slate-600 transition-colors uppercase tracking-widest">Start Fresh</button>
               </div>
             </div>
 
             {result && (
-              <div className="bg-white p-8 sm:p-12 rounded-[2.5rem] sm:rounded-[4rem] shadow-3xl border border-indigo-50 animate-in fade-in slide-in-from-bottom-12 duration-1000">
-                <div className="space-y-6 sm:space-y-10" dir="auto">
+              <div className="bg-white p-8 rounded-[2.5rem] shadow-3xl border border-indigo-50 animate-in fade-in slide-in-from-bottom-6 duration-700">
+                <div className="space-y-6" dir="auto">
                   <div className="flex justify-between items-center">
-                    <span className="px-4 sm:px-6 py-1.5 sm:py-2 bg-indigo-50 text-indigo-600 rounded-full text-[10px] font-black uppercase tracking-[0.2em]">Our Path Forward</span>
-                    <span className="text-xl sm:text-2xl font-black text-indigo-500">{result.confidence}%</span>
+                    <span className="px-4 py-1 bg-indigo-50 text-indigo-600 rounded-full text-[10px] font-black uppercase tracking-widest">Recommendation</span>
+                    <span className="text-xl font-black text-indigo-500">{result.confidence}% Match</span>
                   </div>
-                  <div className="space-y-4 sm:space-y-6">
-                    <h3 className="text-2xl sm:text-4xl font-extrabold text-slate-900 leading-[1.2]">{result.recommendation}</h3>
-                    <p className="text-base sm:text-xl text-slate-600 italic border-l-4 border-indigo-100 pl-4 sm:pl-6">"{result.explanation}"</p>
-                  </div>
+                  <h3 className="text-2xl font-extrabold text-black leading-tight">{result.recommendation}</h3>
+                  <p className="text-slate-600 italic border-l-4 border-indigo-100 pl-4">{result.explanation}</p>
                 </div>
               </div>
             )}
@@ -506,145 +515,300 @@ const App: React.FC = () => {
         )}
 
         {activeTab === 'Focus' && (
-          <div className="space-y-8 sm:y-10 animate-in fade-in slide-in-from-bottom-6 duration-700">
-            <header className="text-center space-y-3 sm:space-y-4 max-w-xl mx-auto">
-              <h2 className="text-3xl sm:text-5xl font-extrabold text-slate-900 tracking-tight">Focus Mode</h2>
-              <p className="text-base sm:text-lg text-slate-500 font-medium">Turn overwhelming tasks into an AI-powered schedule.</p>
+          <div className="space-y-8 animate-in fade-in slide-in-from-bottom-6 duration-700">
+            <header className="text-center space-y-2">
+              <h2 className="text-3xl font-extrabold text-black">Focus Mode</h2>
+              <p className="text-slate-500 font-medium">Prioritize your goals and comments with AI.</p>
             </header>
 
-            <div className="bg-white p-6 sm:p-8 rounded-[2rem] sm:rounded-[3rem] shadow-xl border border-slate-50 space-y-6">
-              <div className="flex flex-col gap-4">
-                <input 
-                  type="text" 
-                  value={newTaskTitle}
-                  onChange={(e) => setNewTaskTitle(e.target.value)}
-                  placeholder="What needs to be done?" 
-                  dir="auto"
-                  className="flex-1 px-5 py-3 sm:px-6 sm:py-4 bg-slate-50 rounded-xl sm:rounded-2xl border-2 border-transparent focus:border-indigo-300 outline-none font-bold text-slate-700 text-sm sm:text-base"
-                />
-                <div className="flex flex-wrap gap-2 sm:gap-4">
+            <div className="bg-white p-6 rounded-[2rem] shadow-xl border border-slate-50 space-y-4">
+              <input 
+                type="text" 
+                value={newTaskTitle}
+                onChange={(e) => setNewTaskTitle(e.target.value)}
+                placeholder="What's the target?" 
+                dir="auto"
+                className="w-full px-6 py-4 bg-slate-50 rounded-xl outline-none font-bold text-black placeholder:text-slate-400 border-2 border-transparent focus:border-indigo-200"
+              />
+              <div className="flex flex-wrap gap-4">
+                <div className="flex-1 min-w-[140px] space-y-1">
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-2">Deadline</label>
                   <input 
                     type="date" 
-                    value={newTaskDeadline}
-                    onChange={(e) => setNewTaskDeadline(e.target.value)}
-                    className="flex-1 min-w-[120px] px-4 py-3 sm:px-6 sm:py-4 bg-slate-50 rounded-xl sm:rounded-2xl border-2 border-transparent focus:border-indigo-300 outline-none font-bold text-slate-700 text-sm sm:text-base"
+                    value={newTaskDeadline} 
+                    onChange={(e) => setNewTaskDeadline(e.target.value)} 
+                    className="w-full px-4 py-3 bg-slate-50 rounded-xl font-bold text-black outline-none border-2 border-transparent focus:border-indigo-100" 
                   />
+                </div>
+                <div className="flex-1 min-w-[140px] space-y-1">
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-2">Priority</label>
                   <select 
                     value={newTaskPriority}
                     onChange={(e) => setNewTaskPriority(e.target.value as any)}
-                    className="flex-1 min-w-[100px] px-4 py-3 sm:px-6 sm:py-4 bg-slate-50 rounded-xl sm:rounded-2xl border-2 border-transparent focus:border-indigo-300 outline-none font-bold text-slate-700 appearance-none text-sm sm:text-base"
+                    className="w-full px-4 py-3 bg-slate-50 rounded-xl font-bold text-black outline-none appearance-none border-2 border-transparent focus:border-indigo-100 cursor-pointer"
                   >
-                    <option value="High">High</option>
-                    <option value="Medium">Medium</option>
-                    <option value="Low">Low</option>
+                    <option value="High">High Priority</option>
+                    <option value="Medium">Medium Priority</option>
+                    <option value="Low">Low Priority</option>
                   </select>
-                  <button onClick={addTask} className="bg-indigo-600 text-white px-6 sm:px-8 py-3 sm:py-4 rounded-xl sm:rounded-2xl font-black hover:bg-indigo-700 transition-all">+</button>
                 </div>
               </div>
-
+              <div className="space-y-1">
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-2">Notes & Comments</label>
+                <textarea 
+                  value={newTaskNotes}
+                  onChange={(e) => setNewTaskNotes(e.target.value)}
+                  placeholder="Context, details, or obstacles..."
+                  dir="auto"
+                  className="w-full px-6 py-4 bg-slate-50 rounded-xl outline-none font-medium text-black h-28 resize-none placeholder:text-slate-400 border-2 border-transparent focus:border-indigo-100"
+                />
+              </div>
+              <div className="flex gap-4">
+                 <button onClick={addTask} className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white py-4 rounded-xl font-black transition-colors shadow-lg active:scale-95">Add Target</button>
+              </div>
+              
               {tasks.length > 0 && (
-                <div className="flex justify-center pt-2 sm:pt-4">
-                  <button 
-                    onClick={handleGenerateSchedule}
-                    disabled={isScheduling}
-                    className="w-full sm:w-auto bg-slate-900 text-white px-8 sm:px-10 py-3 sm:py-4 rounded-full font-black text-sm shadow-lg hover:scale-105 transition-all disabled:opacity-50"
-                  >
-                    {isScheduling ? "Generating Schedule..." : "✨ AI Focus Schedule"}
-                  </button>
-                </div>
+                <button 
+                  onClick={handleGenerateSchedule}
+                  disabled={isScheduling} 
+                  className="w-full py-5 bg-slate-900 text-white rounded-full font-black text-sm shadow-xl hover:bg-black transition-all disabled:opacity-50 flex items-center justify-center gap-3"
+                >
+                   {isScheduling ? (
+                     <>
+                       <div className="w-4 h-4 border-2 border-white/20 border-t-white rounded-full animate-spin" />
+                       Optimizing...
+                     </>
+                   ) : "✨ Optimize Daily Schedule"}
+                </button>
               )}
             </div>
 
-            {scheduleSummary && (
-              <div className="bg-indigo-50 p-5 sm:p-6 rounded-[1.5rem] sm:rounded-[2rem] border border-indigo-100 animate-in fade-in" dir="auto">
-                <p className="text-indigo-800 font-bold italic text-center text-sm sm:text-base">"{scheduleSummary}"</p>
-              </div>
-            )}
-
-            <div className="space-y-6">
-              {sortedTasks.map((task) => (
-                <div key={task.id} className={`bg-white p-6 sm:p-8 rounded-[1.5rem] sm:rounded-[2.5rem] shadow-sm border-2 transition-all ${task.completed ? 'opacity-50 grayscale' : 'border-slate-50 hover:border-indigo-100'}`}>
-                  <div className="flex justify-between items-start mb-4">
-                    <div className="flex gap-3 sm:gap-4 items-start">
-                      <button onClick={() => toggleTask(task.id)} className={`w-6 h-6 sm:w-8 sm:h-8 rounded-full border-2 flex items-center justify-center transition-all ${task.completed ? 'bg-emerald-500 border-emerald-500' : 'border-slate-200'}`}>
-                        {task.completed && <svg className="w-4 h-4 sm:w-5 sm:h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>}
-                      </button>
-                      <div className="space-y-1" dir="auto">
-                        <div className="flex flex-wrap items-center gap-2 sm:gap-3">
-                          {task.suggestedOrder !== undefined && <span className="text-[9px] sm:text-[10px] font-black bg-indigo-100 text-indigo-600 px-2 py-0.5 rounded-md">STEP {task.suggestedOrder}</span>}
-                          <span className={`text-[9px] sm:text-[10px] font-black px-2 py-0.5 rounded-md ${task.priority === 'High' ? 'bg-rose-100 text-rose-600' : task.priority === 'Medium' ? 'bg-amber-100 text-amber-600' : 'bg-slate-100 text-slate-500'}`}>{task.priority} Impact</span>
-                          <span className="text-[9px] sm:text-[10px] font-black text-slate-400 uppercase tracking-widest">{task.deadline}</span>
-                        </div>
-                        <h4 className={`text-xl sm:text-2xl font-extrabold text-slate-900 ${task.completed ? 'line-through' : ''}`}>{task.title}</h4>
-                      </div>
+             {/* AI Optimized Schedule Log */}
+             {showScheduleLog && scheduledTasks.length > 0 && (
+              <div className="bg-slate-900 p-8 rounded-[2.5rem] shadow-2xl text-white animate-in slide-in-from-top-4 duration-500 relative overflow-hidden">
+                <div className="absolute top-0 right-0 p-8 opacity-5 pointer-events-none">
+                  <svg className="w-40 h-40" fill="currentColor" viewBox="0 0 24 24"><path d="M19 3h-1V1h-2v2H8V1H6v2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 16H5V8h14v11zM7 10h5v5H7z"/></svg>
+                </div>
+                
+                <div className="relative z-10 space-y-6" dir="auto">
+                  <div className="flex justify-between items-start">
+                    <div className="space-y-1">
+                       <h3 className="text-2xl font-black uppercase tracking-[0.2em] text-indigo-400">Tactical Strategy</h3>
+                       {scheduleSummary && <p className="text-slate-300 text-lg font-medium italic">"{scheduleSummary}"</p>}
                     </div>
-                    <button onClick={() => deleteTask(task.id)} className="text-slate-300 hover:text-rose-500 transition-colors">
-                      <svg className="w-5 h-5 sm:w-6 sm:h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" /></svg>
+                    <button onClick={() => setShowScheduleLog(false)} className="text-slate-500 hover:text-white transition-colors">
+                      <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" /></svg>
                     </button>
                   </div>
 
-                  {task.reasoning && !task.completed && (
-                    <p className="text-xs sm:text-sm font-bold text-indigo-500/80 mb-6 bg-indigo-50/50 p-3 sm:p-4 rounded-xl sm:rounded-2xl italic" dir="auto">{task.reasoning}</p>
-                  )}
-
-                  {!task.completed && (
-                    <div className="pl-9 sm:pl-12 space-y-3 sm:space-y-4" dir="auto">
-                      {task.subTasks.length > 0 ? (
-                        <div className="space-y-2">
-                          {task.subTasks.map(st => (
-                            <div key={st.id} className="flex items-center gap-2 sm:gap-3 text-slate-600 font-bold text-xs sm:text-sm">
-                              <span className="w-1.5 h-1.5 bg-indigo-400 rounded-full" />
-                              {st.text}
-                            </div>
-                          ))}
+                  <div className="space-y-6 relative pl-5 border-l-2 border-indigo-500/30">
+                    {scheduledTasks.map((task) => (
+                      <div key={task.id} className="relative">
+                        <div className="absolute -left-[27px] top-1.5 w-3.5 h-3.5 rounded-full bg-indigo-500 shadow-[0_0_10px_rgba(99,102,241,0.5)]" />
+                        <div className="space-y-1.5">
+                          <div className="flex items-center gap-2">
+                            <span className="text-[10px] font-black bg-indigo-500/20 text-indigo-300 px-2 py-0.5 rounded uppercase tracking-widest">Step {task.suggestedOrder}</span>
+                            <span className={`text-[10px] font-black px-2 py-0.5 rounded uppercase tracking-widest ${task.priority === 'High' ? 'bg-rose-500/20 text-rose-400' : task.priority === 'Medium' ? 'bg-amber-500/20 text-amber-400' : 'bg-slate-700 text-slate-400'}`}>{task.priority} Priority</span>
+                          </div>
+                          <h4 className="text-xl font-bold">{task.title}</h4>
+                          {task.reasoning && (
+                            <p className="text-sm text-slate-400 font-medium leading-relaxed max-w-xl">{task.reasoning}</p>
+                          )}
                         </div>
-                      ) : (
-                        <button 
-                          onClick={() => handleBreakDown(task.id)}
-                          className="text-[9px] sm:text-[10px] font-black text-indigo-600 hover:text-indigo-800 uppercase tracking-widest border-b border-indigo-200"
-                        >
-                          Break it down into steps
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            <div className="space-y-4">
+              {tasks.filter(t => !t.completed).map(task => (
+                <div key={task.id} className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 transition-all hover:border-indigo-100 group">
+                  <div className="flex justify-between items-start">
+                    <div className="flex gap-4 items-start">
+                      <button onClick={() => toggleTask(task.id)} className="w-7 h-7 rounded-full border-2 border-slate-200 mt-1 hover:border-indigo-400 hover:bg-indigo-50 transition-all flex items-center justify-center group-hover:scale-110" />
+                      <div className="space-y-1">
+                        <div className="flex flex-wrap gap-2 items-center">
+                          <span className={`text-[9px] font-black px-2 py-0.5 rounded uppercase tracking-widest ${task.priority === 'High' ? 'bg-rose-100 text-rose-600' : task.priority === 'Medium' ? 'bg-amber-100 text-amber-600' : 'bg-slate-100 text-slate-400'}`}>
+                             {task.priority} Priority
+                          </span>
+                          <span className="text-[10px] text-slate-400 uppercase font-black">{task.deadline}</span>
+                          {task.suggestedOrder && <span className="text-[9px] font-black bg-indigo-50 text-indigo-600 px-2 py-0.5 rounded uppercase tracking-widest">Planned: Step {task.suggestedOrder}</span>}
+                        </div>
+                        <h4 className="text-xl font-extrabold text-black">{task.title}</h4>
+                        {task.notes && (
+                          <div className="bg-slate-50/50 p-4 rounded-xl mt-3 border-l-2 border-indigo-200">
+                            <p className="text-sm text-slate-700 font-medium" dir="auto">{task.notes}</p>
+                          </div>
+                        )}
+                        {task.reasoning && (
+                          <div className="flex items-center gap-2 pt-2">
+                             <div className="w-2 h-2 rounded-full bg-indigo-400 animate-pulse" />
+                             <p className="text-xs text-indigo-600 font-bold italic" dir="auto">AI Strategy: {task.reasoning}</p>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                    <button onClick={() => deleteTask(task.id)} className="text-slate-300 hover:text-rose-500 transition-colors p-2">
+                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" /></svg>
+                    </button>
+                  </div>
+                  
+                  {/* Breakdown Option */}
+                  {task.subTasks.length === 0 && (
+                     <div className="pl-11 mt-4">
+                        <button onClick={() => handleBreakDown(task.id)} className="text-[10px] font-black text-indigo-500 hover:text-indigo-700 hover:underline uppercase tracking-widest flex items-center gap-1">
+                           + Breakdown to Action Steps
                         </button>
-                      )}
+                     </div>
+                  )}
+                  {/* Subtasks Display */}
+                  {task.subTasks.length > 0 && (
+                    <div className="pl-11 mt-4 space-y-2 border-l-2 border-indigo-50 ml-3.5">
+                      {task.subTasks.map(st => (
+                         <div key={st.id} className="flex items-center gap-2 text-sm text-slate-800 font-bold">
+                            <div className="w-1.5 h-1.5 rounded-full bg-indigo-400" />
+                            {st.text}
+                         </div>
+                      ))}
                     </div>
                   )}
                 </div>
               ))}
+              {tasks.filter(t => !t.completed).length === 0 && (
+                 <div className="text-center py-20 bg-slate-50/50 rounded-[2rem] border-2 border-dashed border-slate-100">
+                    <p className="text-slate-400 font-bold">Your focus targets are empty.</p>
+                 </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'Calendar' && (
+          <div className="space-y-8 animate-in fade-in slide-in-from-bottom-6 duration-700">
+            <header className="flex items-center justify-between">
+              <div>
+                <h2 className="text-3xl font-extrabold text-black">
+                  {currentDate.toLocaleDateString('he-IL', { month: 'long', year: 'numeric' })}
+                </h2>
+                <p className="text-slate-500 text-sm font-bold uppercase tracking-widest mt-1">לוח תכנון אישי</p>
+              </div>
+              <div className="flex gap-2">
+                <button onClick={() => changeMonth(-1)} className="p-2 hover:bg-slate-100 rounded-full transition-colors text-slate-600">
+                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 19l-7-7 7-7" /></svg>
+                </button>
+                <button onClick={() => setCurrentDate(new Date())} className="px-4 py-2 bg-slate-100 text-slate-600 rounded-full text-xs font-black uppercase">היום</button>
+                <button onClick={() => changeMonth(1)} className="p-2 hover:bg-slate-100 rounded-full transition-colors text-slate-600">
+                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5l7 7-7 7" /></svg>
+                </button>
+              </div>
+            </header>
+
+            <div className="bg-white rounded-[2.5rem] p-6 shadow-2xl shadow-indigo-100/40 border border-slate-50">
+              <div className="grid grid-cols-7 mb-4 text-center">
+                {['א', 'ב', 'ג', 'ד', 'ה', 'ו', 'ש'].map(day => (
+                  <div key={day} className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{day}</div>
+                ))}
+              </div>
+
+              <div className="grid grid-cols-7 gap-1 sm:gap-2">
+                {calendarGrid.map((item, idx) => {
+                  const dateStr = `${item.year}-${String(item.month + 1).padStart(2, '0')}-${String(item.day).padStart(2, '0')}`;
+                  const isSelected = selectedCalendarDate === dateStr;
+                  const isToday = new Date().toISOString().split('T')[0] === dateStr;
+                  const dayTasks = tasksByDate[dateStr] || [];
+                  
+                  return (
+                    <button
+                      key={idx}
+                      onClick={() => setSelectedCalendarDate(dateStr)}
+                      className={`relative aspect-square rounded-2xl flex flex-col items-center justify-center transition-all duration-300 group
+                        ${item.isPadding ? 'opacity-20 grayscale' : 'hover:bg-indigo-50'}
+                        ${isSelected ? 'bg-indigo-600 text-white shadow-lg scale-105' : 'bg-transparent'}
+                        ${isToday && !isSelected ? 'border-2 border-indigo-200' : ''}
+                      `}
+                    >
+                      <span className={`text-sm sm:text-lg font-bold ${isSelected ? 'text-white' : 'text-slate-700'}`}>{item.day}</span>
+                      
+                      <div className="flex gap-0.5 mt-1">
+                        {dayTasks.slice(0, 3).map((t, i) => (
+                          <div 
+                            key={i} 
+                            className={`w-1 h-1 rounded-full ${
+                              isSelected ? 'bg-white/50' : 
+                              t.priority === 'High' ? 'bg-rose-400' : 
+                              t.priority === 'Medium' ? 'bg-amber-400' : 'bg-indigo-400'
+                            }`} 
+                          />
+                        ))}
+                        {dayTasks.length > 3 && <div className={`w-1 h-1 rounded-full ${isSelected ? 'bg-white/50' : 'bg-slate-300'}`} />}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="animate-in slide-in-from-top-4 duration-500">
+              <div className="flex items-center justify-between px-4 mb-4">
+                <h3 className="text-xl font-black text-black">
+                  {new Date(selectedCalendarDate).toLocaleDateString('he-IL', { weekday: 'long', day: 'numeric', month: 'long' })}
+                </h3>
+                <span className="text-[10px] font-black text-indigo-400 bg-indigo-50 px-3 py-1 rounded-full uppercase tracking-widest">
+                  {selectedDateTasks.length} משימות
+                </span>
+              </div>
+
+              {selectedDateTasks.length === 0 ? (
+                <div className="text-center py-12 bg-slate-50/50 rounded-[2rem] border-2 border-dashed border-slate-100">
+                  <p className="text-slate-400 font-bold">אין משימות מתוכננות ליום זה</p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {selectedDateTasks.map(task => (
+                    <div key={task.id} className={`bg-white p-5 rounded-2xl shadow-sm border border-slate-50 flex items-center justify-between transition-all ${task.completed ? 'opacity-40 grayscale' : ''}`}>
+                      <div className="flex items-center gap-4">
+                        <button onClick={() => toggleTask(task.id)} className={`w-6 h-6 rounded-full border-2 flex items-center justify-center transition-all ${task.completed ? 'bg-emerald-500 border-emerald-500' : 'border-slate-200'}`}>
+                          {task.completed && <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" /></svg>}
+                        </button>
+                        <div className="space-y-1">
+                          <h4 className={`font-bold text-black ${task.completed ? 'line-through' : ''}`}>{task.title}</h4>
+                          <div className="flex gap-2">
+                             <span className={`text-[8px] font-black px-1.5 py-0.5 rounded uppercase ${task.priority === 'High' ? 'bg-rose-100 text-rose-500' : task.priority === 'Medium' ? 'bg-amber-100 text-amber-500' : 'bg-slate-100 text-slate-400'}`}>
+                                {task.priority} Priority
+                             </span>
+                             {task.notes && <span className="text-[8px] font-bold text-slate-400 uppercase tracking-widest">• Note attached</span>}
+                          </div>
+                        </div>
+                      </div>
+                      <button onClick={() => deleteTask(task.id)} className="text-slate-200 hover:text-rose-400 transition-colors">
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" /></svg>
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
         )}
 
         {activeTab === 'History' && (
-          <div className="space-y-8 sm:y-10 animate-in fade-in duration-700">
-            <h2 className="text-3xl sm:text-4xl font-extrabold text-slate-900 tracking-tight">Choice History</h2>
+          <div className="space-y-8 animate-in fade-in duration-700">
+            <h2 className="text-3xl font-extrabold text-black">History</h2>
             {history.length === 0 ? (
-              <div className="text-center py-16 sm:py-24 bg-white rounded-[2rem] sm:rounded-[3rem] border-2 border-dashed border-slate-100">
-                <p className="text-slate-400 font-bold text-base sm:text-lg">No decisions logged yet.</p>
-              </div>
+               <div className="text-center py-20 bg-white rounded-[2rem] border-2 border-dashed border-slate-100">
+                  <p className="text-slate-400 font-bold">Your decision logs are empty.</p>
+               </div>
             ) : (
-              <div className="grid grid-cols-1 gap-4 sm:gap-6">
+              <div className="grid gap-4">
                 {history.map(item => (
-                  <div key={item.id} className="bg-white p-6 sm:p-8 rounded-[1.5rem] sm:rounded-[2.5rem] border border-slate-100 shadow-sm hover:shadow-md transition-shadow group">
-                    <div className="flex justify-between items-start mb-4 sm:mb-6" dir="auto">
-                      <div className="space-y-2">
-                        <div className="flex items-center gap-3">
-                           <span className="text-[9px] sm:text-[10px] font-black text-indigo-400 uppercase tracking-widest">{new Date(item.createdAt).toLocaleDateString()}</span>
-                        </div>
-                        <h4 className="text-lg sm:text-xl font-bold text-slate-800 line-clamp-2">{item.dilemma}</h4>
-                      </div>
-                      <select 
-                        value={item.outcome} 
-                        onChange={(e) => updateOutcome(item.id, e.target.value as any)}
-                        className="text-[9px] sm:text-[10px] font-black px-3 py-1.5 sm:px-4 sm:py-2 rounded-full border-none focus:ring-2 focus:ring-indigo-100 bg-slate-100"
-                      >
-                        <option value="Pending">Waiting...</option>
-                        <option value="Followed">Followed</option>
-                        <option value="Ignored">Ignored</option>
-                      </select>
+                  <div key={item.id} className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm transition-shadow hover:shadow-md">
+                    <div className="flex justify-between items-start mb-2">
+                       <h4 className="font-extrabold text-black text-lg" dir="auto">{item.dilemma}</h4>
+                       <span className="text-[10px] text-slate-400 font-black">{new Date(item.createdAt).toLocaleDateString()}</span>
                     </div>
-                    <div className="bg-slate-50/50 p-4 sm:p-6 rounded-2xl sm:rounded-3xl" dir="auto">
-                      <p className="text-sm sm:text-base font-bold text-slate-700">{item.recommendation}</p>
-                    </div>
+                    <p className="text-sm text-indigo-600 font-bold border-t border-slate-50 pt-3 mt-3">{item.recommendation}</p>
                   </div>
                 ))}
               </div>
@@ -653,29 +817,17 @@ const App: React.FC = () => {
         )}
       </main>
 
-      {/* Floating Microphone Button - Anchored Fixed at Bottom-Right */}
-      {activeTab !== 'History' && (
-        <div className="fixed bottom-4 right-4 sm:bottom-10 sm:right-10 z-[100]">
-          <div className="relative">
-             {isListening && <div className="absolute inset-0 rounded-full animate-ping bg-indigo-500 opacity-20 scale-125 md:scale-150" />}
-             <button
-              onClick={toggleVoiceInput}
-              className={`relative w-14 h-14 sm:w-20 sm:h-20 rounded-full flex items-center justify-center shadow-3xl transition-all duration-500 ${
-                isListening ? 'bg-rose-500 scale-110' : 'bg-slate-900 hover:bg-black hover:scale-105'
-              }`}
-            >
-              <svg className="w-6 h-6 sm:w-10 sm:h-10 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
-              </svg>
-            </button>
-          </div>
-        </div>
-      )}
-
-      <footer className="mt-24 sm:mt-40 pb-16 flex flex-col items-center gap-6 text-slate-300 font-medium text-sm">
-        <Logo className="opacity-15 grayscale scale-75 sm:scale-90" />
-        <p className="text-[9px] sm:text-[10px] font-black uppercase tracking-[0.3em] opacity-30">© 2025 Decision Helper Live</p>
-      </footer>
+      {/* Voice Assistant Toggle */}
+      <div className="fixed bottom-10 right-10 z-50">
+        <button
+          onClick={toggleVoiceInput}
+          className={`w-20 h-20 rounded-full flex items-center justify-center shadow-3xl transition-all duration-500 ${isListening ? 'bg-rose-500 scale-110' : 'bg-slate-900 hover:bg-black'}`}
+        >
+          <svg className="w-10 h-10 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
+          </svg>
+        </button>
+      </div>
     </div>
   );
 };

@@ -41,6 +41,7 @@ export interface Task {
   subTasks: SubTask[];
   suggestedOrder?: number;
   reasoning?: string;
+  notes?: string;
 }
 
 export interface ScheduleResult {

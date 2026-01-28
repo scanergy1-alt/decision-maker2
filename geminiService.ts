@@ -2,9 +2,11 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { Decision, DecisionResult, Task, ScheduleResult } from "./types";
 
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || '' });
+// Moved GoogleGenAI initialization inside functions as per guidelines to ensure the latest API key is used and that process.env.API_KEY is accessed directly.
 
 export const getDecisionRecommendation = async (decision: Decision): Promise<DecisionResult> => {
+  // Initialize AI client right before use
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   const model = 'gemini-3-flash-preview';
   
   const dilemmaLength = decision.dilemma.length;
@@ -65,7 +67,9 @@ Detect the language of the dilemma and respond in that same language.
       },
     });
 
-    return JSON.parse(response.text);
+    // Use property text (not a method) and handle potential undefined
+    const text = (response.text || "").trim();
+    return JSON.parse(text);
   } catch (error) {
     console.error("Gemini API Error:", error);
     throw new Error("My thought process was interrupted. Could you try asking again?");
@@ -73,6 +77,8 @@ Detect the language of the dilemma and respond in that same language.
 };
 
 export const breakDownTask = async (taskTitle: string): Promise<string[]> => {
+  // Initialize AI client right before use
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   const model = 'gemini-3-flash-preview';
   const prompt = `Break the task "${taskTitle}" into 3-5 simple, actionable micro-steps. Detect the input language and respond in the same language. Keep steps concise.`;
   
@@ -91,12 +97,15 @@ export const breakDownTask = async (taskTitle: string): Promise<string[]> => {
     }
   });
 
-  return JSON.parse(response.text);
+  const text = (response.text || "").trim();
+  return JSON.parse(text);
 };
 
 export const generateSchedule = async (tasks: Task[]): Promise<ScheduleResult> => {
+  // Initialize AI client right before use
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   const model = 'gemini-3-pro-preview';
-  const taskSummary = tasks.map(t => `ID: ${t.id}, Title: ${t.title}, Deadline: ${t.deadline}, Priority: ${t.priority}`).join('\n');
+  const taskSummary = tasks.map(t => `ID: ${t.id}, Title: ${t.title}, Deadline: ${t.deadline}, Priority: ${t.priority}, Notes: ${t.notes || 'None'}`).join('\n');
   
   const prompt = `
 Current Tasks:
@@ -106,7 +115,8 @@ Task: Organize these tasks into an optimized schedule. Detect the primary langua
 Consider:
 1. Urgency (Deadlines).
 2. Importance (Priority).
-3. Logic (What should be done first to build momentum?).
+3. Notes/Context provided.
+4. Logic (What should be done first to build momentum?).
 
 Provide an order for each task ID and a short 'Reasoning' for why it's placed there.
 `;
@@ -141,5 +151,6 @@ Provide an order for each task ID and a short 'Reasoning' for why it's placed th
     }
   });
 
-  return JSON.parse(response.text);
+  const text = (response.text || "").trim();
+  return JSON.parse(text);
 };
