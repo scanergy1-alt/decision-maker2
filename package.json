@@ -1,6 +1,9 @@
 {
   "name": "decision-helper",
   "version": "1.0.1",
+  "engines": {
+    "node": ">=18"
+  },
   "scripts": {
     "start": "parcel index.html",
     "build": "rm -rf .parcel-cache && parcel build index.html --no-cache --dist-dir dist --no-optimize"
