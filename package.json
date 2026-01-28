@@ -2,7 +2,7 @@
   "name": "decision-helper",
   "version": "1.0.1",
   "engines": {
-    "node": ">=18"
+    "node": "18.x"
   },
   "scripts": {
     "start": "parcel index.html",
