@@ -1,10 +1,13 @@
 {
   "name": "decision-helper",
   "version": "1.0.0",
-  "source": "index.html",
+  "type": "module",
+  "engines": {
+    "node": ">=18.0.0"
+  },
   "scripts": {
-    "start": "parcel",
-    "build": "parcel build",
+    "start": "parcel index.html",
+    "build": "parcel build index.html --no-cache --dist-dir dist",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "dependencies": {
@@ -15,8 +18,6 @@
   },
   "devDependencies": {
     "parcel": "^2.12.0",
-    "process": "^0.11.10",
-    "buffer": "^6.0.3",
     "typescript": "^5.2.2",
     "@types/react": "^18.3.3",
     "@types/react-dom": "^18.3.0",
