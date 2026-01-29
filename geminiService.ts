@@ -10,23 +10,29 @@ export const getDecisionRecommendation = async (decision: Decision): Promise<Dec
   const model = 'gemini-3-flash-preview';
   
   const dilemmaLength = decision.dilemma.length;
-  const isLongInput = dilemmaLength > 200 || (decision.pros.length + decision.cons.length > 0);
+  const hasDetails = decision.pros.length > 0 || decision.cons.length > 0;
   
   const prosText = decision.pros.length > 0 
     ? "User-provided Advantages:\n" + decision.pros.map(p => `- ${p.text}`).join('\n')
-    : "";
+    : "No specific advantages provided by user.";
   const consText = decision.cons.length > 0 
     ? "User-provided Disadvantages:\n" + decision.cons.map(c => `- ${c.text}`).join('\n')
-    : "";
+    : "No specific disadvantages provided by user.";
 
   const prompt = `
-Dilemma: ${decision.dilemma}
-${prosText}
-${consText}
+You are a decision-making AI assistant.
 
-Task: Provide a decisive and empathetic recommendation.
-${isLongInput 
-  ? "Since this is a detailed dilemma, provide a structured response including a list of core advantages and disadvantages you've identified." 
+Your task:
+1. Read the user’s dilemma: "${decision.dilemma}"
+2. Read the list of advantages they provided:
+${prosText}
+3. Read the list of disadvantages they provided:
+${consText}
+4. Weigh these factors against each other to determine the best course of action.
+5. Provide a clear, decisive recommendation based on this analysis.
+
+${hasDetails || dilemmaLength > 200
+  ? "Since this is a detailed dilemma, provide a structured response including a list of core advantages and disadvantages you've identified in your analysis." 
   : "Since this is a short dilemma, be extremely concise and punchy."}
 
 Detect the language of the dilemma and respond in that same language.
@@ -36,17 +42,17 @@ Detect the language of the dilemma and respond in that same language.
     type: Type.OBJECT,
     properties: {
       recommendation: { type: Type.STRING, description: "A clear, decisive action-oriented recommendation." },
-      explanation: { type: Type.STRING, description: "A human-like explanation of the reasoning." },
+      explanation: { type: Type.STRING, description: "A human-like explanation of the reasoning, showing how you weighed the pros and cons." },
       confidence: { type: Type.NUMBER, description: "Confidence level 0-100." },
       advantages: { 
         type: Type.ARRAY, 
         items: { type: Type.STRING }, 
-        description: "Key advantages to follow this choice (for detailed analysis)." 
+        description: "Key advantages supporting the recommendation." 
       },
       disadvantages: { 
         type: Type.ARRAY, 
         items: { type: Type.STRING }, 
-        description: "Key risks or disadvantages to consider (for detailed analysis)." 
+        description: "Key risks or disadvantages to consider." 
       },
     },
     required: ["recommendation", "explanation", "confidence"]
@@ -57,7 +63,13 @@ Detect the language of the dilemma and respond in that same language.
       model,
       contents: prompt,
       config: {
-        systemInstruction: `You are 'Decision Helper'. You help users solve daily dilemmas. 
+        systemInstruction: `You are 'Decision Helper'. 
+        Your goal is to help users make tough choices by analyzing their specific situation.
+        1. Read their dilemma.
+        2. Analyze their provided pros and cons.
+        3. Weigh them logically.
+        4. Give a decisive recommendation.
+        
         Be friendly and empathetic, but prioritize being DECISIVE. 
         Always respond in the same language as the user's input. 
         In Hebrew, use masculine forms (בלשון זכר).`,
